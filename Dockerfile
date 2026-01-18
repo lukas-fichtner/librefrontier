@@ -22,4 +22,4 @@ COPY gui/templates ./templates
 
 EXPOSE 80 8080
 
-CMD ["./api"]
+CMD ["sh", "-c", "./api & ./gui"]

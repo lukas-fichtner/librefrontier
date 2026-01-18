@@ -1,22 +1,27 @@
-version: '2'
 services:
   librefrontier:
     build: .
     image: compujuckel/librefrontier
-    expose:
-      - "80"
+    ports:
+      - "80:80"
+      - "8080:8080"
+    depends_on:
+      - postgres
     environment:
-      LF_API_BASE_URL: "${LF_API_BASE_URL}"
-      LF_DB_CONN_STRING: "${LF_DB_CONN_STRING}"
+      LF_API_BASE_URL: "${LF_API_BASE_URL:-http://localhost}"
+      LF_DB_CONN_STRING: "postgres://librefrontier:${POSTGRES_PASSWORD:-librefrontier}@postgres:5432/librefrontier?sslmode=disable"
   postgres:
-    image: postgres
+    image: postgres:15-alpine
     restart: always
     volumes:
       - librefrontier-db:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d
     environment:
       POSTGRES_USER: librefrontier
-      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-librefrontier}"
       POSTGRES_DB: librefrontier
+    ports:
+      - "5432:5432"
 volumes:
   librefrontier-db:
     driver: local

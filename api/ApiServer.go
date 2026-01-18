@@ -8,7 +8,6 @@ import (
 	log "github.com/sirupsen/logrus"
 	"go.uber.org/fx"
 	"net/http"
-	"strconv"
 )
 
 type ApiServer struct {
@@ -28,8 +27,8 @@ type DeviceInfo struct {
 
 type PaginatedRequest struct {
 	Device *DeviceInfo
-	Start  int `form:"startItems" binding:"required"`
-	End    int `form:"endItems" binding:"required"`
+	Start  int `form:"startItems"`
+	End    int `form:"endItems"`
 }
 
 type SearchRequestSingle struct {
@@ -94,6 +93,21 @@ func NewApiController(lc fx.Lifecycle, config *common.Config, database *common.D
 func (a *ApiServer) fsLoginXML(c *gin.Context) {
 	log.Printf("fs_loginXML")
 
+	base := a.cfg.GetApiBaseUrl()
+	if base == "" {
+		proto := c.Request.Header.Get("X-Forwarded-Proto")
+		if proto == "" {
+			if c.Request.TLS != nil {
+				proto = "https"
+			} else {
+				proto = "http"
+			}
+		}
+		base = proto + "://" + c.Request.Host
+		a.cfg.SetApiBaseUrl(base)
+		log.Infof("Derived api base URL from request: %s", base)
+	}
+
 	if c.Query("token") == "0" {
 		// TODO investigate how this is used
 		c.String(http.StatusOK, "<EncryptedToken>3a3f5ac48a1dab4e</EncryptedToken>")
@@ -149,19 +163,28 @@ func (a *ApiServer) fsLoginXML(c *gin.Context) {
 func (a *ApiServer) fsSearch(c *gin.Context) {
 	var r SearchRequestSingle
 
-	if c.Bind(&r) != nil {
+	err := c.Bind(&r)
+	if err != nil {
+		log.Warnf("fsSearch bind error: %v", err)
+		c.AbortWithStatus(http.StatusBadRequest)
 		return
 	}
 
 	a.db.CreateDevice(r.Device.Mac)
 
-	log.Printf("search mac = %s Search = %s sSearchtype = %s\n", r.Device.Mac, r.Search, r.SearchType)
+	log.Debugf("fsSearch: mac=%s, Search=%s, sSearchtype=%d", r.Device.Mac, r.Search, r.SearchType)
 
 	station, err := a.radio.GetStationById(r.Search)
 	if err != nil {
+		log.Errorf("Failed to get station by ID %s: %v", r.Search, err)
 		c.AbortWithStatus(http.StatusNotFound)
 		return
 	}
+	
+	// Cache the station in the database for truncated UUID resolution
+	a.db.CacheStation(station.Id, station.Name)
+	
+	log.Debugf("Found station: %s (ID: %s)", station.Name, station.Id)
 	list := a.xml.CreateStationsList([]radioprovider.Station{station}, 0, 0, true)
 
 	a.xml.WriteToWire(c.Writer, list)
@@ -173,15 +196,27 @@ func (a *ApiServer) getEmpty(c *gin.Context) {
 
 func (a *ApiServer) getCountries(c *gin.Context) {
 	var p PaginatedRequest
-	if c.Bind(&p) != nil {
+	err := c.Bind(&p)
+	if err != nil {
+		log.Warnf("getCountries bind error: %v", err)
+		c.AbortWithStatus(http.StatusBadRequest)
 		return
 	}
 
+	if p.Start == 0 && p.End == 0 {
+		p.Start = 1
+		p.End = 50
+	}
+
+	log.Debugf("getCountries called: mac=%s, start=%d, end=%d", p.Device.Mac, p.Start, p.End)
+
 	countries, err := a.radio.GetCountries()
 	if err != nil {
+		log.Errorf("Failed to get countries: %v", err)
 		c.AbortWithStatus(http.StatusInternalServerError)
 		return
 	}
+	log.Debugf("Retrieved %d countries", len(countries))
 	list := a.xml.CreateCountryList(countries, p.Start-1, p.End)
 
 	a.xml.WriteToWire(c.Writer, list)
@@ -189,15 +224,28 @@ func (a *ApiServer) getCountries(c *gin.Context) {
 
 func (a *ApiServer) getStationsByCountry(c *gin.Context) {
 	var p PaginatedRequest
-	if c.Bind(&p) != nil {
+	err := c.Bind(&p)
+	if err != nil {
+		log.Warnf("getStationsByCountry bind error: %v", err)
+		c.AbortWithStatus(http.StatusBadRequest)
 		return
 	}
 
-	stations, err := a.radio.GetStationsByCountry(c.Param("country"))
+	if p.Start == 0 && p.End == 0 {
+		p.Start = 1
+		p.End = 50
+	}
+
+	countryCode := c.Param("country")
+	log.Debugf("getStationsByCountry called: country=%s, mac=%s, start=%d, end=%d", countryCode, p.Device.Mac, p.Start, p.End)
+
+	stations, err := a.radio.GetStationsByCountry(countryCode)
 	if err != nil {
+		log.Errorf("Failed to get stations for country %s: %v", countryCode, err)
 		c.AbortWithStatus(http.StatusInternalServerError)
 		return
 	}
+	log.Debugf("Retrieved %d stations for country %s", len(stations), countryCode)
 	list := a.xml.CreateStationsList(stations, p.Start-1, p.End, false)
 
 	a.xml.WriteToWire(c.Writer, list)
@@ -205,15 +253,27 @@ func (a *ApiServer) getStationsByCountry(c *gin.Context) {
 
 func (a *ApiServer) getMostPopularStations(c *gin.Context) {
 	var p PaginatedRequest
-	if c.Bind(&p) != nil {
+	err := c.Bind(&p)
+	if err != nil {
+		log.Warnf("getMostPopularStations bind error: %v", err)
+		c.AbortWithStatus(http.StatusBadRequest)
 		return
 	}
 
+	if p.Start == 0 && p.End == 0 {
+		p.Start = 1
+		p.End = 50
+	}
+
+	log.Debugf("getMostPopularStations called: mac=%s, start=%d, end=%d", p.Device.Mac, p.Start, p.End)
+
 	stations, err := a.radio.GetMostPopularStations(100)
 	if err != nil {
+		log.Errorf("Failed to get popular stations: %v", err)
 		c.AbortWithStatus(http.StatusInternalServerError)
 		return
 	}
+	log.Debugf("Retrieved %d popular stations", len(stations))
 	list := a.xml.CreateStationsList(stations, p.Start-1, p.End, false)
 
 	a.xml.WriteToWire(c.Writer, list)
@@ -221,15 +281,27 @@ func (a *ApiServer) getMostPopularStations(c *gin.Context) {
 
 func (a *ApiServer) getMostLikedStations(c *gin.Context) {
 	var p PaginatedRequest
-	if c.Bind(&p) != nil {
+	err := c.Bind(&p)
+	if err != nil {
+		log.Warnf("getMostLikedStations bind error: %v", err)
+		c.AbortWithStatus(http.StatusBadRequest)
 		return
 	}
 
+	if p.Start == 0 && p.End == 0 {
+		p.Start = 1
+		p.End = 50
+	}
+
+	log.Debugf("getMostLikedStations called: mac=%s, start=%d, end=%d", p.Device.Mac, p.Start, p.End)
+
 	stations, err := a.radio.GetMostLikedStations(100)
 	if err != nil {
+		log.Errorf("Failed to get liked stations: %v", err)
 		c.AbortWithStatus(http.StatusInternalServerError)
 		return
 	}
+	log.Debugf("Retrieved %d liked stations", len(stations))
 	list := a.xml.CreateStationsList(stations, p.Start-1, p.End, false)
 
 	a.xml.WriteToWire(c.Writer, list)
@@ -237,15 +309,27 @@ func (a *ApiServer) getMostLikedStations(c *gin.Context) {
 
 func (a *ApiServer) searchStations(c *gin.Context) {
 	var s SearchRequest
-	if c.Bind(&s) != nil {
+	err := c.Bind(&s)
+	if err != nil {
+		log.Warnf("searchStations bind error: %v", err)
+		c.AbortWithStatus(http.StatusBadRequest)
 		return
 	}
 
+	if s.Start == 0 && s.End == 0 {
+		s.Start = 1
+		s.End = 50
+	}
+
+	log.Debugf("searchStations called: search=%s, mac=%s, start=%d, end=%d", s.Search, s.Device.Mac, s.Start, s.End)
+
 	stations, err := a.radio.SearchStations(s.Search)
 	if err != nil {
+		log.Errorf("Failed to search stations for '%s': %v", s.Search, err)
 		c.AbortWithStatus(http.StatusInternalServerError)
 		return
 	}
+	log.Debugf("Search '%s' returned %d stations", s.Search, len(stations))
 	list := a.xml.CreateStationsList(stations, s.Start-1, s.End, false)
 
 	a.xml.WriteToWire(c.Writer, list)
@@ -253,41 +337,54 @@ func (a *ApiServer) searchStations(c *gin.Context) {
 
 func (a *ApiServer) getStationDetail(c *gin.Context) {
 	var d DeviceInfo
-	if c.Bind(&d) != nil {
+	err := c.Bind(&d)
+	if err != nil {
+		log.Warnf("getStationDetail bind error: %v", err)
+		c.AbortWithStatus(http.StatusBadRequest)
 		return
 	}
 
-	station, err := a.radio.GetStationById(c.Param("station"))
+	stationId := c.Param("station")
+	log.Debugf("getStationDetail called: stationId=%s, mac=%s", stationId, d.Mac)
+
+	station, err := a.radio.GetStationById(stationId)
 	if err != nil {
+		log.Errorf("Failed to get station %s: %v", stationId, err)
 		c.AbortWithStatus(http.StatusNotFound)
 		return
 	}
 
-	id, err := strconv.ParseUint(station.Id, 10, 32)
-	if err != nil {
-		c.AbortWithStatus(http.StatusInternalServerError)
-		return
-	}
+	// Cache the station in the database for truncated UUID resolution
+	a.db.CacheStation(station.Id, station.Name)
 
-	fav := a.db.IsFavorite(d.Mac, id)
+	fav := a.db.IsFavorite(d.Mac, station.Id)
+	log.Debugf("Station %s (%s) favorite status for %s: %v", station.Name, station.Id, d.Mac, fav)
 	list := a.xml.CreateStationDetail(station, fav)
 
 	a.xml.WriteToWire(c.Writer, list)
 }
 
 func (a *ApiServer) getStreamUrl(c *gin.Context) {
-	station, err := a.radio.GetStationById(c.Param("station"))
+	stationId := c.Param("station")
+	log.Debugf("getStreamUrl called: stationId=%s", stationId)
+
+	station, err := a.radio.GetStationById(stationId)
 	if err != nil {
+		log.Errorf("Failed to get stream URL for station %s: %v", stationId, err)
 		c.AbortWithStatus(http.StatusNotFound)
 		return
 	}
 
+	log.Debugf("Returning stream URL for %s: %s", station.Name, station.StreamUrl)
 	c.String(http.StatusOK, station.StreamUrl)
 }
 
 func (a *ApiServer) addFavorite(c *gin.Context) {
 	var d DeviceInfo
-	if c.Bind(&d) != nil {
+	err := c.Bind(&d)
+	if err != nil {
+		log.Warnf("addFavorite bind error: %v", err)
+		c.AbortWithStatus(http.StatusBadRequest)
 		return
 	}
 
@@ -297,13 +394,7 @@ func (a *ApiServer) addFavorite(c *gin.Context) {
 		return
 	}
 
-	id, err := strconv.ParseInt(station.Id, 10, 64)
-	if err != nil {
-		c.AbortWithStatus(http.StatusInternalServerError)
-		return
-	}
-
-	a.db.AddFavorite(d.Mac, id, station.Name)
+	a.db.AddFavorite(d.Mac, station.Id, station.Name)
 	log.Infof("Added favorite %s for mac %s", station.Name, d.Mac)
 
 	list := a.xml.CreateStationDetail(station, false)
@@ -313,7 +404,10 @@ func (a *ApiServer) addFavorite(c *gin.Context) {
 
 func (a *ApiServer) removeFavorite(c *gin.Context) {
 	var d DeviceInfo
-	if c.Bind(&d) != nil {
+	err := c.Bind(&d)
+	if err != nil {
+		log.Warnf("removeFavorite bind error: %v", err)
+		c.AbortWithStatus(http.StatusBadRequest)
 		return
 	}
 
@@ -323,13 +417,7 @@ func (a *ApiServer) removeFavorite(c *gin.Context) {
 		return
 	}
 
-	id, err := strconv.ParseUint(station.Id, 10, 64)
-	if err != nil {
-		c.AbortWithStatus(http.StatusInternalServerError)
-		return
-	}
-
-	a.db.RemoveFavorite(d.Mac, id)
+	a.db.RemoveFavorite(d.Mac, station.Id)
 	log.Infof("Removed favorite %s for mac %s", station.Name, d.Mac)
 
 	list := a.xml.CreateStationDetail(station, false)
@@ -339,8 +427,16 @@ func (a *ApiServer) removeFavorite(c *gin.Context) {
 
 func (a *ApiServer) getFavorites(c *gin.Context) {
 	var p PaginatedRequest
-	if c.Bind(&p) != nil {
+	err := c.Bind(&p)
+	if err != nil {
+		log.Warnf("getFavorites bind error: %v", err)
+		c.AbortWithStatus(http.StatusBadRequest)
 		return
+	}
+
+	if p.Start == 0 && p.End == 0 {
+		p.Start = 1
+		p.End = 50
 	}
 
 	stations := a.db.GetFavoriteStations(p.Device.Mac)

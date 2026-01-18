@@ -13,6 +13,7 @@ func Startup(g *GuiServer) {
 
 func main() {
 	log.SetOutput(os.Stdout)
+	log.SetLevel(log.DebugLevel)
 	log.SetFormatter(&log.TextFormatter{
 		ForceColors: true,
 	})

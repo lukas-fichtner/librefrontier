@@ -11,6 +11,13 @@ func (c *Config) GetApiBaseUrl() string {
 	return c.apiBaseUrl
 }
 
+// SetApiBaseUrl sets the base URL if not already configured (useful when LF_API_BASE_URL is empty).
+func (c *Config) SetApiBaseUrl(url string) {
+	if c.apiBaseUrl == "" {
+		c.apiBaseUrl = url
+	}
+}
+
 func (c *Config) GetDbConnString() string {
 	return c.dbConnString
 }

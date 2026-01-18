@@ -6,7 +6,7 @@ CREATE TABLE device (
 CREATE TABLE station (
     station_id SERIAL PRIMARY KEY,
     name TEXT NOT NULL,
-    radiobrowser_id INTEGER UNIQUE,
+    radiobrowser_id TEXT UNIQUE NOT NULL,
     stream_url TEXT
 );
 

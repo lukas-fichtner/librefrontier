@@ -2,16 +2,16 @@ package radioprovider
 
 type Country struct {
 	Name         string `json:"name"`
-	Id           string `json:"value"`
-	StationCount string `json:"stationcount"`
+	Id           string `json:"iso_3166_1"`
+	StationCount int    `json:"stationcount"`
 }
 
 type Station struct {
 	Name      string `json:"name"`
-	Id        string `json:"id"`
-	StreamUrl string `json:"url"`
+	Id        string `json:"stationuuid"`
+	StreamUrl string `json:"url_resolved"`
 	Codec     string `json:"codec"`
-	Bitrate   string `json:"bitrate"`
+	Bitrate   int    `json:"bitrate"`
 	Homepage  string `json:"homepage"`
 	Country   string `json:"country"`
 	Genre     string `json:"tags"`

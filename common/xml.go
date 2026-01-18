@@ -63,10 +63,23 @@ func (x *XmlBuilder) CreateCountryList(countries []radioprovider.Country, start 
 		ItemCount: len(countries),
 	}
 
+	if start < 0 {
+		start = 0
+	}
+	if start > result.ItemCount {
+		start = result.ItemCount
+	}
+
 	end++
 
 	if end > result.ItemCount {
 		end = result.ItemCount
+	}
+	if end < start {
+		end = start
+	}
+	if end < start {
+		end = start
 	}
 
 	log.Debugf("countries %d - %d\n", start, end)
@@ -95,6 +108,13 @@ func (x *XmlBuilder) CreateCountryList(countries []radioprovider.Country, start 
 func (x *XmlBuilder) CreateStationsList(stations []radioprovider.Station, start int, end int, direct bool) ListOfItems {
 	result := ListOfItems{
 		ItemCount: len(stations),
+	}
+
+	if start < 0 {
+		start = 0
+	}
+	if start > result.ItemCount {
+		start = result.ItemCount
 	}
 
 	end++
@@ -176,7 +196,7 @@ func (x *XmlBuilder) CreateStationDetail(station radioprovider.Station, favorite
 		x.CreateStationItem(station),
 		{
 			ItemType:     "Dir",
-			Title:        station.Codec + " " + station.Bitrate + "kbps",
+			Title:        station.Codec + " " + strconv.Itoa(station.Bitrate) + "kbps",
 			UrlDir:       x.cfg.apiBaseUrl + "/empty",
 			UrlDirBackUp: x.cfg.apiBaseUrl + "/empty",
 		},

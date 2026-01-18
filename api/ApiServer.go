@@ -2,12 +2,17 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
+	"fmt"
 	"github.com/compujuckel/librefrontier/common"
 	"github.com/compujuckel/librefrontier/common/radioprovider"
 	"github.com/gin-gonic/gin"
 	log "github.com/sirupsen/logrus"
 	"go.uber.org/fx"
+	"io"
 	"net/http"
+	"net/url"
+	"strings"
 )
 
 type ApiServer struct {
@@ -61,6 +66,7 @@ func NewApiController(lc fx.Lifecycle, config *common.Config, database *common.D
 	a.gin.GET("/stations/liked", a.getMostLikedStations)
 	a.gin.GET("/stations/search", a.searchStations)
 	a.gin.GET("/station/:station/play", a.getStreamUrl)
+	a.gin.GET("/proxy/stream", a.proxyStream)
 	a.gin.GET("/station/:station", a.getStationDetail)
 	a.gin.GET("/favorite/add/:station", a.addFavorite)
 	a.gin.GET("/favorite/remove/:station", a.removeFavorite)
@@ -375,8 +381,87 @@ func (a *ApiServer) getStreamUrl(c *gin.Context) {
 		return
 	}
 
-	log.Debugf("Returning stream URL for %s: %s", station.Name, station.StreamUrl)
-	c.String(http.StatusOK, station.StreamUrl)
+	// Check if stream URL is HTTPS
+	if strings.HasPrefix(strings.ToLower(station.StreamUrl), "https://") {
+		// Create proxy URL for HTTPS streams
+		proxyUrl := fmt.Sprintf("%s/proxy/stream?url=%s", a.cfg.GetApiBaseUrl(), url.QueryEscape(station.StreamUrl))
+		log.Debugf("Stream is HTTPS, returning proxy URL for %s: %s", station.Name, proxyUrl)
+		c.String(http.StatusOK, proxyUrl)
+	} else {
+		// Return HTTP stream URL as-is
+		log.Debugf("Returning HTTP stream URL for %s: %s", station.Name, station.StreamUrl)
+		c.String(http.StatusOK, station.StreamUrl)
+	}
+}
+
+func (a *ApiServer) proxyStream(c *gin.Context) {
+	streamUrl := c.Query("url")
+	if streamUrl == "" {
+		log.Warn("proxyStream called without url parameter")
+		c.AbortWithStatus(http.StatusBadRequest)
+		return
+	}
+
+	log.Debugf("Proxying HTTPS stream: %s", streamUrl)
+
+	// Create HTTP client with TLS support
+	client := &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: false},
+		},
+	}
+
+	// Request the HTTPS stream
+	req, err := http.NewRequest("GET", streamUrl, nil)
+	if err != nil {
+		log.Errorf("Failed to create request for %s: %v", streamUrl, err)
+		c.AbortWithStatus(http.StatusInternalServerError)
+		return
+	}
+
+	// Copy all headers from the original request to preserve ICY metadata and other important headers
+	for key, values := range c.Request.Header {
+		// Skip host header as it should be set to the upstream server
+		if strings.ToLower(key) == "host" {
+			continue
+		}
+		for _, value := range values {
+			req.Header.Add(key, value)
+		}
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Errorf("Failed to fetch stream from %s: %v", streamUrl, err)
+		c.AbortWithStatus(http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		log.Warnf("Stream returned non-OK status %d for %s", resp.StatusCode, streamUrl)
+		c.AbortWithStatus(resp.StatusCode)
+		return
+	}
+
+	// Set status first, before any headers
+	c.Status(http.StatusOK)
+	
+	// Copy response headers to preserve ICY metadata and content type
+	for key, values := range resp.Header {
+		for _, value := range values {
+			c.Header(key, value)
+		}
+	}
+
+	// Flush headers to client
+	c.Writer.Flush()
+
+	// Stream the content
+	_, err = io.Copy(c.Writer, resp.Body)
+	if err != nil {
+		log.Debugf("Stream copy completed/interrupted for %s: %v", streamUrl, err)
+	}
 }
 
 func (a *ApiServer) addFavorite(c *gin.Context) {

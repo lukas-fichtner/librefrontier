@@ -1,18 +1,26 @@
 services:
   librefrontier:
-    build: .
-    image: compujuckel/librefrontier
+    build:
+      context: .
+      dockerfile: Dockerfile
     ports:
       - "80:80"
       - "8080:8080"
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
     environment:
       LF_API_BASE_URL: "${LF_API_BASE_URL:-http://localhost}"
       LF_DB_CONN_STRING: "postgres://librefrontier:${POSTGRES_PASSWORD:-librefrontier}@postgres:5432/librefrontier?sslmode=disable"
+
   postgres:
     image: postgres:15-alpine
     restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U librefrontier"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     volumes:
       - librefrontier-db:/var/lib/postgresql/data
       - ./migrations:/docker-entrypoint-initdb.d
@@ -22,6 +30,7 @@ services:
       POSTGRES_DB: librefrontier
     ports:
       - "5432:5432"
+
 volumes:
   librefrontier-db:
     driver: local

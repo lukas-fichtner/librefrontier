@@ -12,7 +12,8 @@ import (
 )
 
 type Client struct {
-	db interface {
+	httpClient *resty.Client
+	db         interface {
 		GetStationByTruncatedUUID(string) (string, bool)
 	}
 }
@@ -20,9 +21,9 @@ type Client struct {
 func NewRadioBrowserClient(db interface {
 	GetStationByTruncatedUUID(string) (string, bool)
 }) radioprovider.RadioProvider {
-	// Set a speaking User-Agent per RadioBrowser guidelines
-	resty.SetHeader("User-Agent", "LibreFrontier/0.1 (+https://github.com/compujuckel/librefrontier)")
-	return &Client{db: db}
+	c := resty.New()
+	c.SetHeader("User-Agent", "LibreFrontier/0.1 (+https://github.com/compujuckel/librefrontier)")
+	return &Client{httpClient: c, db: db}
 }
 
 var _ radioprovider.RadioProvider = (*Client)(nil)
@@ -31,7 +32,7 @@ func (r *Client) GetCountries() ([]radioprovider.Country, error) {
 	url := "https://de1.api.radio-browser.info/json/countries"
 	log.Debugf("Fetching countries from: %s", url)
 
-	resp, err := resty.R().Get(url)
+	resp, err := r.httpClient.R().Get(url)
 	if err != nil {
 		return nil, errors.Wrap(err, "get countries")
 	}
@@ -57,7 +58,7 @@ func (r *Client) GetStationsByCountry(countryId string) ([]radioprovider.Station
 	url := "https://de1.api.radio-browser.info/json/stations/bycountrycodeexact/" + countryId
 	log.Debugf("Fetching stations by country from: %s", url)
 
-	resp, err := resty.R().Get(url)
+	resp, err := r.httpClient.R().Get(url)
 	if err != nil {
 		return nil, errors.Wrap(err, "get stations")
 	}
@@ -83,7 +84,7 @@ func (r *Client) GetMostPopularStations(count int) ([]radioprovider.Station, err
 	url := "https://de1.api.radio-browser.info/json/stations/topclick/" + strconv.Itoa(count)
 	log.Debugf("Fetching most popular stations from: %s", url)
 
-	resp, err := resty.R().Get(url)
+	resp, err := r.httpClient.R().Get(url)
 	if err != nil {
 		return nil, errors.Wrap(err, "get stations")
 	}
@@ -109,7 +110,7 @@ func (r *Client) GetMostLikedStations(count int) ([]radioprovider.Station, error
 	url := "https://de1.api.radio-browser.info/json/stations/topvote/" + strconv.Itoa(count)
 	log.Debugf("Fetching most liked stations from: %s", url)
 
-	resp, err := resty.R().Get(url)
+	resp, err := r.httpClient.R().Get(url)
 	if err != nil {
 		return nil, errors.Wrap(err, "get stations")
 	}
@@ -135,7 +136,7 @@ func (r *Client) SearchStations(search string) ([]radioprovider.Station, error) 
 	url := "https://de1.api.radio-browser.info/json/stations/byname/" + url.PathEscape(search)
 	log.Debugf("Searching stations from: %s", url)
 
-	resp, err := resty.R().Get(url)
+	resp, err := r.httpClient.R().Get(url)
 	if err != nil {
 		return nil, errors.Wrap(err, "get stations")
 	}
@@ -161,7 +162,7 @@ func (r *Client) GetStationById(stationId string) (radioprovider.Station, error)
 	byUUID := "https://de1.api.radio-browser.info/json/stations/byuuid/" + stationId
 	log.Debugf("Fetching station by ID from: %s", byUUID)
 
-	resp, err := resty.R().Get(byUUID)
+	resp, err := r.httpClient.R().Get(byUUID)
 	if err != nil {
 		return radioprovider.Station{}, errors.Wrap(err, "get station")
 	}
@@ -192,25 +193,7 @@ func (r *Client) GetStationById(stationId string) (radioprovider.Station, error)
 				return r.GetStationById(fullUUID)
 			}
 		}
-		// Heuristic: many station UUIDs end with '52543be04c81'. If final block is 8 chars and starts with '52543be0', try completing with '4c81'.
-		parts := strings.Split(stationId, "-")
-		if len(parts) == 5 {
-			last := parts[4]
-			if len(last) == 8 && strings.HasPrefix(last, "52543be0") {
-				candidate := parts[0] + "-" + parts[1] + "-" + parts[2] + "-" + parts[3] + "-" + last + "4c81"
-				log.Infof("Attempting heuristic completion for truncated UUID %s -> %s", stationId, candidate)
-				byUUID2 := "https://de1.api.radio-browser.info/json/stations/byuuid/" + candidate
-				resp2, err2 := resty.R().Get(byUUID2)
-				if err2 == nil && !resp2.IsError() {
-					var stations2 []radioprovider.Station
-					if json.Unmarshal(resp2.Body(), &stations2) == nil && len(stations2) > 0 {
-						log.Infof("Heuristic completion resolved station: %s", stations2[0].Name)
-						return stations2[0], nil
-					}
-				}
-			}
-		}
-		log.Warnf("UUID truncated (len=%d, missing %d chars): %s - station not in database, cannot resolve", 
+		log.Warnf("UUID truncated (len=%d, missing %d chars): %s - station not in database, cannot resolve",
 			len(stationId), 36-len(stationId), stationId)
 	}
 
@@ -219,7 +202,7 @@ func (r *Client) GetStationById(stationId string) (radioprovider.Station, error)
 		byID := "https://de1.api.radio-browser.info/json/stations/byid/" + stationId
 		log.Debugf("UUID lookup empty; retrying legacy byid endpoint: %s", byID)
 
-		resp, err = resty.R().Get(byID)
+		resp, err = r.httpClient.R().Get(byID)
 		if err != nil {
 			return radioprovider.Station{}, errors.Wrap(err, "get station byid")
 		}

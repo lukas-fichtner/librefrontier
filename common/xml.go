@@ -78,9 +78,6 @@ func (x *XmlBuilder) CreateCountryList(countries []radioprovider.Country, start 
 	if end < start {
 		end = start
 	}
-	if end < start {
-		end = start
-	}
 
 	log.Debugf("countries %d - %d\n", start, end)
 

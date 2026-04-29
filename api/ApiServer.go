@@ -10,6 +10,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"go.uber.org/fx"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -402,6 +403,12 @@ func (a *ApiServer) proxyStream(c *gin.Context) {
 		return
 	}
 
+	if !isAllowedStreamURL(streamUrl) {
+		log.Warnf("proxyStream rejected disallowed URL: %s", streamUrl)
+		c.AbortWithStatus(http.StatusBadRequest)
+		return
+	}
+
 	log.Debugf("Proxying HTTPS stream: %s", streamUrl)
 
 	// Create HTTP client with TLS support
@@ -482,7 +489,7 @@ func (a *ApiServer) addFavorite(c *gin.Context) {
 	a.db.AddFavorite(d.Mac, station.Id, station.Name)
 	log.Infof("Added favorite %s for mac %s", station.Name, d.Mac)
 
-	list := a.xml.CreateStationDetail(station, false)
+	list := a.xml.CreateStationDetail(station, true)
 
 	a.xml.WriteToWire(c.Writer, list)
 }
@@ -529,4 +536,37 @@ func (a *ApiServer) getFavorites(c *gin.Context) {
 	list := a.xml.CreateStationsList(stations, p.Start-1, p.End, false)
 
 	a.xml.WriteToWire(c.Writer, list)
+}
+
+// isAllowedStreamURL validates that a URL is safe to proxy: only http/https
+// and not pointing at private/loopback addresses (SSRF prevention).
+func isAllowedStreamURL(rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return false
+	}
+	host := u.Hostname()
+	if host == "" {
+		return false
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		for _, cidr := range []string{
+			"127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12",
+			"192.168.0.0/16", "169.254.0.0/16", "0.0.0.0/8",
+			"::1/128", "fc00::/7", "fe80::/10",
+		} {
+			_, network, _ := net.ParseCIDR(cidr)
+			if network != nil && network.Contains(ip) {
+				return false
+			}
+		}
+	}
+	lower := strings.ToLower(host)
+	return lower != "localhost" &&
+		!strings.HasSuffix(lower, ".local") &&
+		!strings.HasSuffix(lower, ".internal") &&
+		!strings.HasSuffix(lower, ".localhost")
 }

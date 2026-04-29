@@ -104,9 +104,10 @@ func (d *Database) RemoveFavorite(mac string, stationId string) {
                 USING device d, station s
            	    WHERE d.device_id = f.device_id
                   AND s.station_id = f.station_id
-           	      AND s.radiobrowser_id = $1`
+                  AND d.mac = $1
+           	      AND s.radiobrowser_id = $2`
 
-	_, err := d.db.Exec(s, stationId)
+	_, err := d.db.Exec(s, mac, stationId)
 	if err != nil {
 		log.Error("Error removing favorite: ", err)
 	}
@@ -140,6 +141,7 @@ func (d *Database) GetFavoriteStations(mac string) []radioprovider.Station {
 		log.Error("error getting favorite stations", err)
 		return []radioprovider.Station{}
 	}
+	defer rows.Close()
 
 	var stations []radioprovider.Station
 	for rows.Next() {
@@ -158,6 +160,12 @@ func (d *Database) GetFavoriteStations(mac string) []radioprovider.Station {
 }
 
 func (d *Database) GetStationByTruncatedUUID(truncatedUuid string) (string, bool) {
+	// Validate input to prevent LIKE wildcard injection — UUIDs only contain hex digits and hyphens
+	for _, ch := range truncatedUuid {
+		if !((ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f') || (ch >= 'A' && ch <= 'F') || ch == '-') {
+			return "", false
+		}
+	}
 	// Cast to text to be robust even if column type was created as integer in older schemas
 	s := `SELECT radiobrowser_id FROM station WHERE radiobrowser_id::text LIKE $1 || '%' LIMIT 1`
 

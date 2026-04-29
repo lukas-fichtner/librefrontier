@@ -17,11 +17,12 @@ import (
 )
 
 type ApiServer struct {
-	db    *common.Database
-	cfg   *common.Config
-	xml   *common.XmlBuilder
-	gin   *gin.Engine
-	radio radioprovider.RadioProvider
+	db         *common.Database
+	cfg        *common.Config
+	xml        *common.XmlBuilder
+	gin        *gin.Engine
+	radio      radioprovider.RadioProvider
+	httpClient *http.Client
 }
 
 type DeviceInfo struct {
@@ -58,6 +59,12 @@ func NewApiController(lc fx.Lifecycle, config *common.Config, database *common.D
 	a.xml = xmlBuilder
 	a.radio = radioProvider
 	a.gin = gin.Default()
+	a.httpClient = &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig:    &tls.Config{InsecureSkipVerify: false},
+			DisableCompression: true,
+		},
+	}
 
 	a.gin.GET("/setupapp/karcher/asp/BrowseXML/loginXML.asp", a.fsLoginXML)
 	a.gin.GET("/setupapp/karcher/asp/BrowseXML/Search.asp", a.fsSearch)
@@ -411,13 +418,6 @@ func (a *ApiServer) proxyStream(c *gin.Context) {
 
 	log.Debugf("Proxying HTTPS stream: %s", streamUrl)
 
-	// Create HTTP client with TLS support
-	client := &http.Client{
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: false},
-		},
-	}
-
 	// Request the HTTPS stream
 	req, err := http.NewRequest("GET", streamUrl, nil)
 	if err != nil {
@@ -437,7 +437,7 @@ func (a *ApiServer) proxyStream(c *gin.Context) {
 		}
 	}
 
-	resp, err := client.Do(req)
+	resp, err := a.httpClient.Do(req)
 	if err != nil {
 		log.Errorf("Failed to fetch stream from %s: %v", streamUrl, err)
 		c.AbortWithStatus(http.StatusBadGateway)
@@ -445,7 +445,7 @@ func (a *ApiServer) proxyStream(c *gin.Context) {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
 		log.Warnf("Stream returned non-OK status %d for %s", resp.StatusCode, streamUrl)
 		c.AbortWithStatus(resp.StatusCode)
 		return

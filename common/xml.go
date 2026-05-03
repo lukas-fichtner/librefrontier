@@ -88,7 +88,7 @@ func (x *XmlBuilder) CreateCountryList(countries []radioprovider.Country, start 
 		UrlPrevious:       x.cfg.apiBaseUrl + "/setupapp/karcher/asp/BrowseXML/loginXML.asp?gofile=",
 		UrlPreviousBackUp: x.cfg.apiBaseUrl + "/setupapp/karcher/asp/BrowseXML/loginXML.asp?gofile=",
 	})
-	for i := start; i < end; i++ {
+	for i := start; i < end && i < len(countries); i++ {
 		items = append(items, Item{
 			ItemType:     "Dir",
 			Title:        countries[i].Name,
@@ -184,21 +184,21 @@ func (x *XmlBuilder) CreateStationDetail(station radioprovider.Station, favorite
 		}
 	}
 
-	items := []Item{
-		{
-			ItemType:          "Previous",
-			UrlPrevious:       x.cfg.apiBaseUrl + "/TODO",
-			UrlPreviousBackUp: x.cfg.apiBaseUrl + "/TODO",
-		},
-		x.CreateStationItem(station),
-		{
-			ItemType:     "Dir",
-			Title:        station.Codec + " " + strconv.Itoa(station.Bitrate) + "kbps",
-			UrlDir:       x.cfg.apiBaseUrl + "/empty",
-			UrlDirBackUp: x.cfg.apiBaseUrl + "/empty",
-		},
-		favItem,
-	}
+		items := []Item{
+			{
+				ItemType:          "Previous",
+				UrlPrevious:       x.cfg.apiBaseUrl + "/station/" + station.Id,
+				UrlPreviousBackUp: x.cfg.apiBaseUrl + "/station/" + station.Id,
+			},
+			x.CreateStationItem(station),
+			{
+				ItemType:     "Dir",
+				Title:        station.Codec + " " + strconv.Itoa(station.Bitrate) + "kbps",
+				UrlDir:       x.cfg.apiBaseUrl + "/empty",
+				UrlDirBackUp: x.cfg.apiBaseUrl + "/empty",
+			},
+			favItem,
+		}
 
 	return ListOfItems{
 		ItemCount: len(items) - 1,

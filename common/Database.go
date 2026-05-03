@@ -83,19 +83,40 @@ func (d *Database) CacheStation(stationId string, stationName string) {
 }
 
 func (d *Database) AddFavorite(mac string, stationId string, stationName string) {
+	// Use a transaction to ensure atomicity
+	tx, err := d.db.Begin()
+	if err != nil {
+		log.Error("Error starting transaction for adding favorite: ", err)
+		return
+	}
+	defer func() {
+		if err := tx.Rollback(); err != nil && err != sql.ErrTxDone {
+			log.Error("Error rolling back transaction for adding favorite: ", err)
+		}
+	}()
+
+	// Create or update the station
 	d.createRadioBrowserStation(stationId, stationName)
 
 	s := `INSERT INTO favorite (device_id, station_id) SELECT (SELECT d.device_id FROM device d WHERE d.mac = $1), (SELECT s.station_id FROM station s WHERE s.radiobrowser_id = $2)`
 
-	_, err := d.db.Exec(s, mac, stationId)
+	_, err = tx.Exec(s, mac, stationId)
 	if err != nil {
-		log.Error("Error creating station: ", err)
+		log.Error("Error adding favorite: ", err)
+		return
 	}
 
 	// Cache truncated UUID if applicable for future lookups (resolves truncated UUIDs from legacy devices)
 	if len(stationId) >= 23 && len(stationId) <= 36 && strings.Contains(stationId, "-") {
 		truncated := stationId[:23] // Store first 23 chars as a prefix for LIKE queries
 		log.Debugf("Cached truncated UUID %s for station %s", truncated, stationId)
+	}
+
+	// Commit the transaction
+	err = tx.Commit()
+	if err != nil {
+		log.Error("Error committing transaction for adding favorite: ", err)
+		return
 	}
 }
 

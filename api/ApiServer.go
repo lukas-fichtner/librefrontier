@@ -123,6 +123,8 @@ func (a *ApiServer) fsLoginXML(c *gin.Context) {
 	}
 
 	if c.Query("token") == "0" {
+		// This is a Frontier Silicon device authentication token response
+		// The token is used for device authentication and session management
 		// TODO investigate how this is used
 		c.String(http.StatusOK, "<EncryptedToken>3a3f5ac48a1dab4e</EncryptedToken>")
 		return

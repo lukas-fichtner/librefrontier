@@ -16,10 +16,13 @@ type GuiServer struct {
 }
 
 func (g *GuiServer) GetFavorites(c *gin.Context) {
-	favorites := g.db.GetFavoriteStations("...")
-
+	deviceMac := c.Query("mac")
+	if deviceMac == "" {
+		deviceMac = "00:00:00:00:00:00"
+	}
+	stations := g.db.GetFavoriteStations(deviceMac)
 	c.HTML(http.StatusOK, "favorites.html.tpl", gin.H{
-		"favorites": favorites,
+		"Stations": stations,
 	})
 }
 

@@ -14,12 +14,21 @@ FROM alpine:latest
 
 RUN apk update && apk --no-cache add ca-certificates
 
-WORKDIR /root/
+# Create a non-root user and group
+RUN addgroup -S librefrontier && adduser -S librefrontier -G librefrontier
 
-COPY --from=builder /build/api .
-COPY --from=builder /build/gui .
-COPY gui/templates ./templates
+WORKDIR /app
 
-EXPOSE 80 8080
+# Copy binaries with ownership set to the non-root user
+COPY --from=builder --chown=librefrontier:librefrontier /build/api .
+COPY --from=builder --chown=librefrontier:librefrontier /build/gui .
+COPY --chown=librefrontier:librefrontier gui/templates ./templates
+
+# Switch to the non-root user
+USER librefrontier
+
+EXPOSE 8080 8081
+
+ENV GIN_MODE=release
 
 CMD ["sh", "-c", "./api & ./gui"]
